@@ -70,8 +70,9 @@ interface FileUpload {
 }
 
 const models: Model[] = [
-  { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku" },
-  { id: "claude-3-5-sonnet-20240620", name: "Claude 3.5 Sonnet" },
+  { id: "anthropic.claude-3-haiku-20240307-v1:0", name: "Claude 3 Haiku" },
+  { id: "anthropic.claude-3-5-sonnet-20241022-v2:0", name: "Claude 3 Sonnet" },
+  // Add other Bedrock models as needed
 ];
 
 // Updated APIResponse interface
@@ -121,16 +122,14 @@ const MessageComponent: React.FC<MessageComponentProps> = ({ message }) => {
         </Avatar>
       )}
       <div
-        className={`flex flex-col max-w-[75%] ${
-          message.role === "user" ? "ml-auto" : ""
-        }`}
+        className={`flex flex-col max-w-[75%] ${message.role === "user" ? "ml-auto" : ""
+          }`}
       >
         <div
-          className={`p-3 rounded-md text-base ${
-            message.role === "user"
-              ? "bg-primary text-primary-foreground"
-              : "bg-muted border"
-          }`}
+          className={`p-3 rounded-md text-base ${message.role === "user"
+            ? "bg-primary text-primary-foreground"
+            : "bg-muted border"
+            }`}
         >
           {message.content === "thinking" ? (
             <div className="flex items-center">
@@ -183,11 +182,10 @@ const ChartPagination = ({
       <button
         key={i}
         onClick={() => onDotClick(i)}
-        className={`w-2 h-2 rounded-full transition-all ${
-          i === current
-            ? "bg-primary scale-125"
-            : "bg-muted hover:bg-primary/50"
-        }`}
+        className={`w-2 h-2 rounded-full transition-all ${i === current
+          ? "bg-primary scale-125"
+          : "bg-muted hover:bg-primary/50"
+          }`}
       />
     ))}
   </div>
@@ -198,7 +196,7 @@ export default function AIChat() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState(
-    "claude-3-5-sonnet-20240620",
+    "anthropic.claude-3-5-sonnet-20241022-v2:0",
   );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chartEndRef = useRef<HTMLDivElement>(null);
@@ -392,7 +390,7 @@ export default function AIChat() {
     setInput("");
     setIsLoading(true);
 
-    // Prepare all messages for the API request
+    // Prepare messages for Bedrock API request
     const apiMessages = [...messages, userMessage].map((msg) => {
       if (msg.file) {
         if (msg.file.isText) {
@@ -613,9 +611,8 @@ export default function AIChat() {
                 {messages.map((message) => (
                   <div
                     key={message.id}
-                    className={`animate-fade-in-up ${
-                      message.content === "thinking" ? "animate-pulse" : ""
-                    }`}
+                    className={`animate-fade-in-up ${message.content === "thinking" ? "animate-pulse" : ""
+                      }`}
                   >
                     <MessageComponent message={message} />
                   </div>
@@ -700,7 +697,7 @@ export default function AIChat() {
                         className="w-full min-h-full flex-shrink-0 snap-start snap-always"
                         ref={
                           index ===
-                          messages.filter((m) => m.chartData).length - 1
+                            messages.filter((m) => m.chartData).length - 1
                             ? chartEndRef
                             : null
                         }

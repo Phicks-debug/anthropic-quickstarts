@@ -1,14 +1,14 @@
 // app/api/finance/route.ts
 import { NextRequest } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
+import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import type { ChartData } from "@/types/chart";
 
-// Initialize Anthropic client with correct headers
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
+// Initialize Bedrock client
+const bedrock = new BedrockRuntimeClient({
+  region: 'us-west-2',
 });
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 // Helper to validate base64
 const isValidBase64 = (str: string) => {
@@ -98,6 +98,30 @@ const tools: ToolSchema[] = [
       required: ["chartType", "config", "data", "chartConfig"],
     },
   },
+  {
+    name: "get_stock_price",
+    description: "Use this tool to retrieve the historical stock price data for a specific company. This tool will get the open high low close value of the ticker. The tool has been set to take the price until today and 1 month behind as default. If the user do not specify the date, always get the price for the latest date.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        ticker: {
+          type: "string" as const,
+          description: "The stock ticker symbol",
+        },
+        start: {
+          type: "string" as const,
+          format: "date" as const,
+          description: "The start date for the price data (format: YYYY-MM-DD)",
+        },
+        end: {
+          type: "string" as const,
+          format: "date" as const,
+          description: "The end date for the price data (format: YYYY-MM-DD)",
+        },
+      },
+      required: ["ticker", "start", "end"],
+    }
+  }
 ];
 
 export async function POST(req: NextRequest) {
@@ -128,7 +152,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Convert all previous messages
-    let anthropicMessages = messages.map((msg: any) => ({
+    let bedrockMessages = messages.map((msg: any) => ({
       role: msg.role,
       content: msg.content,
     }));
@@ -150,7 +174,7 @@ export async function POST(req: NextRequest) {
           const textContent = decodeURIComponent(escape(atob(base64)));
 
           // Replace only the last message with the file content
-          anthropicMessages[anthropicMessages.length - 1] = {
+          bedrockMessages[bedrockMessages.length - 1] = {
             role: "user",
             content: [
               {
@@ -165,7 +189,7 @@ export async function POST(req: NextRequest) {
           };
         } else if (mediaType.startsWith("image/")) {
           // Handle image files
-          anthropicMessages[anthropicMessages.length - 1] = {
+          bedrockMessages[bedrockMessages.length - 1] = {
             role: "user",
             content: [
               {
@@ -192,33 +216,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    console.log("🚀 Final Anthropic API Request:", {
-      endpoint: "messages.create",
-      model,
+    const bedrockPayload = {
+      anthropic_version: "bedrock-2023-05-31",
       max_tokens: 4096,
       temperature: 0.7,
-      messageCount: anthropicMessages.length,
-      tools: tools.map((t) => t.name),
-      messageStructure: JSON.stringify(
-        anthropicMessages.map((msg) => ({
-          role: msg.role,
-          content:
-            typeof msg.content === "string"
-              ? msg.content.slice(0, 50) + "..."
-              : "[Complex Content]",
-        })),
-        null,
-        2,
-      ),
-    });
-
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: 4096,
-      temperature: 0.7,
+      messages: bedrockMessages,
       tools: tools,
       tool_choice: { type: "auto" },
-      messages: anthropicMessages,
       system: `You are a financial data visualization expert. Your role is to analyze financial data and create clear, meaningful visualizations using generate_graph_data tool:
 
 Here are the chart types available and their ideal use cases:
@@ -327,28 +331,38 @@ Never:
 - NEVER SAY you are using the generate_graph_data tool, just execute it when needed.
 
 Focus on clear financial insights and let the visualization enhance understanding.`,
+    };
+
+    console.log("🚀 Bedrock API Request:", {
+      model,
+      messageCount: bedrockMessages.length,
+      tools: tools.map((t) => t.name),
     });
 
-    console.log("✅ Anthropic API Response received:", {
+    // Create the Bedrock command
+    const command = new InvokeModelCommand({
+      modelId: model,
+      body: JSON.stringify(bedrockPayload),
+      contentType: "application/json",
+      accept: "application/json",
+    });
+
+    // Send request to Bedrock
+    const bedrockResponse = await bedrock.send(command);
+    const responseBody = new TextDecoder().decode(bedrockResponse.body);
+    const response = JSON.parse(responseBody);
+
+    console.log(response)
+
+    console.log("✅ Bedrock API Response received:", {
       status: "success",
       stopReason: response.stop_reason,
-      hasToolUse: response.content.some((c) => c.type === "tool_use"),
-      contentTypes: response.content.map((c) => c.type),
-      contentLength:
-        response.content[0].type === "text"
-          ? response.content[0].text.length
-          : 0,
-      toolOutput: response.content.find((c) => c.type === "tool_use")
-        ? JSON.stringify(
-            response.content.find((c) => c.type === "tool_use"),
-            null,
-            2,
-          )
-        : "No tool used",
+      hasToolUse: response.content.some((c: any) => c.type === "tool_use"),
+      contentTypes: response.content.map((c: any) => c.type),
     });
 
-    const toolUseContent = response.content.find((c) => c.type === "tool_use");
-    const textContent = response.content.find((c) => c.type === "text");
+    const toolUseContent = response.content.find((c: any) => c.type === "tool_use");
+    const textContent = response.content.find((c: any) => c.type === "text");
 
     const processToolResponse = (toolUseContent: any) => {
       if (!toolUseContent) return null;
@@ -408,7 +422,7 @@ Focus on clear financial insights and let the visualization enhance understandin
     return new Response(
       JSON.stringify({
         content: textContent?.text || "",
-        hasToolUse: response.content.some((c) => c.type === "tool_use"),
+        hasToolUse: response.content.some((c: any) => c.type === "tool_use"),
         toolUse: toolUseContent,
         chartData: processedChartData,
       }),
@@ -429,32 +443,22 @@ Focus on clear financial insights and let the visualization enhance understandin
       response: error instanceof Error ? (error as any).response : undefined,
     });
 
-    // Add specific error handling for different scenarios
-    if (error instanceof Anthropic.APIError) {
+    // Handle Bedrock-specific errors
+    if (error instanceof Error) {
+      const statusCode = (error as any).statusCode || 500;
       return new Response(
         JSON.stringify({
-          error: "API Error",
+          error: "Bedrock API Error",
           details: error.message,
-          code: error.status,
+          code: statusCode,
         }),
-        { status: error.status },
-      );
-    }
-
-    if (error instanceof Anthropic.AuthenticationError) {
-      return new Response(
-        JSON.stringify({
-          error: "Authentication Error",
-          details: "Invalid API key or authentication failed",
-        }),
-        { status: 401 },
+        { status: statusCode }
       );
     }
 
     return new Response(
       JSON.stringify({
-        error:
-          error instanceof Error ? error.message : "An unknown error occurred",
+        error: "An unknown error occurred",
       }),
       {
         status: 500,
